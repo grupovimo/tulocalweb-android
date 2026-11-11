@@ -8,6 +8,8 @@ A="$M/apps/android/app/src/test/resources"
 (cd "$M/apps/ios/TuLocalWeb/Pantallas" && find . -name '*.swift' | sed 's|^\./||' | sort) > "$A/paridad.txt"
 # Las respuestas de la API simulada, las mismas que lee iOS (apps/pruebas).
 mkdir -p "$A/pruebas" && cp "$M/apps/pruebas/respuestas.json" "$A/pruebas/"
+# Qué links abren la app (EnlacesTest): la misma lista que sirve la web.
+cp "$M/apps/pruebas/enlaces.json" "$A/pruebas/"
 rsync -a --delete --exclude .git --exclude publicar.sh --exclude local.properties --exclude build --exclude .gradle --exclude .kotlin "$M/apps/android/" "$R/"
 PIE="
 
