@@ -14,7 +14,7 @@ rsync -a --delete --exclude .git --exclude publicar.sh --exclude local.propertie
 PIE="
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
-Claude-Session: https://claude.ai/code/session_019W2t1DphCtMkajKz7vZJLk"
+Claude-Session: https://claude.ai/code/session_019W2t1CYZ5z8M5mn5cAGkKF"
 cd "$M" && git add apps/android apps/pruebas && (git diff --cached --quiet || git commit -qm "Android: $MSJ$PIE") && git push -q origin main
 cd "$R" && git add -A && (git diff --cached --quiet || git commit -qm "$MSJ$PIE")
 T=$(gh auth token -u grupovimo)
