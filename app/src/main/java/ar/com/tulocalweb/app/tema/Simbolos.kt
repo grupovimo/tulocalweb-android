@@ -128,5 +128,18 @@ internal object Simbolos {
         "wifi.slash" to '\ue648', // wifi_off
         "xmark.circle" to '\ue888', // cancel
         "xmark" to '\ue5cd', // close
+        "plus.square.on.square" to '\ue03c', // library_add
+        "eye.slash" to '\ue8f5', // visibility_off
+        "arrow.uturn.forward" to '\ue15a', // redo
+        "hand.raised" to '\ue764', // back_hand
+        "square.on.circle" to '\ue7c8', // interests
+        "paintpalette" to '\ue40a', // palette
+        "pencil" to '\uf097', // edit
+        "exclamationmark.circle" to '\uf8b6', // error
+        "slider.horizontal.3" to '\ue429', // tune
+        "rectangle.topthird" to '\ue9f7', // toolbar
+        "arrow.up.left.and.arrow.down.right" to '\uf1ce', // open_in_full
+        "building.columns" to '\ue84f', // account_balance
+        "lock.shield" to '\uf686', // shield_lock
     )
 }

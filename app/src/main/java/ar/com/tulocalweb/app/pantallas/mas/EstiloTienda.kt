@@ -1,8 +1,5 @@
 package ar.com.tulocalweb.app.pantallas.mas
 
-import android.annotation.SuppressLint
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -34,12 +31,19 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
 import ar.com.tulocalweb.app.nucleo.Api
+import ar.com.tulocalweb.app.nucleo.CatalogoBloques
+import ar.com.tulocalweb.app.nucleo.PresetTienda
+import ar.com.tulocalweb.app.nucleo.valorDe
+import kotlinx.serialization.builtins.ListSerializer
 import ar.com.tulocalweb.app.nucleo.Recursos
 import ar.com.tulocalweb.app.nucleo.Valor
 import ar.com.tulocalweb.app.nucleo.ValorJSON
 import ar.com.tulocalweb.app.nucleo.Web
+import ar.com.tulocalweb.app.nucleo.get
+import ar.com.tulocalweb.app.nucleo.lista
+import ar.com.tulocalweb.app.nucleo.objeto
+import ar.com.tulocalweb.app.nucleo.texto
 import ar.com.tulocalweb.app.tema.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -49,8 +53,8 @@ import kotlin.math.roundToInt
 // Clon de Pantallas/Mas/EstiloTienda.swift.
 
 /** Mi tienda › Estilo (components/schemas/EstiloTienda), igual que en la web (apps/web/src/lib/tienda/estilo/estilo.ts):
- *  colores por rol y por zona, tipografías, logos, anuncio, títulos de las secciones, redes y el menú. Todo opcional:
- *  vacío es lo de la plantilla. */
+ *  dirección, forma, densidad, ancho, fotos, encabezado, pie, colores por rol y por zona, tipografías, logos, barra de
+ *  anuncios, redes y el menú. Todo opcional: vacío es lo de la dirección o la plantilla. */
 @Serializable
 data class EstiloTienda(
     val colores: Map<String, String>? = null,
@@ -65,16 +69,46 @@ data class EstiloTienda(
     val textos: Map<String, String>? = null,
     val redes: Map<String, String>? = null,
     val menu: List<ItemMenu>? = null,
+    // Diseño v2 (todos opcionales; vacío = lo de la dirección o el preset).
+    val direccion: String? = null,
+    val forma: String? = null,
+    val densidad: String? = null,
+    val ancho: String? = null,
+    val fotoProducto: String? = null,
+    val encabezado: String? = null,
+    val pie: String? = null,
+    val barra: Barra? = null,
+    val whatsappFlotante: Boolean? = null,
 ) {
     @Serializable data class ItemMenu(val t: String, val a: String)
+    @Serializable data class Barra(val variante: String = "fija", val mensajes: List<Mensaje> = emptyList(), val fondo: String? = null) {
+        @Serializable data class Mensaje(val texto: String = "", val link: String? = null)
+    }
 
-    /** Para mandarlo dentro del diseño: sin lo vacío (Go lo limpia igual). */
+    /** Un ajuste de forma (direccion, forma, densidad…) por su nombre en bloques.json › estilo. */
+    fun opcion(id: String): String? = when (id) {
+        "direccion" -> direccion; "forma" -> forma; "densidad" -> densidad; "ancho" -> ancho
+        "fotoProducto" -> fotoProducto; "encabezado" -> encabezado; "pie" -> pie; else -> null
+    }
+
+    fun conOpcion(id: String, v: String?): EstiloTienda {
+        val x = v?.ifEmpty { null }
+        return when (id) {
+            "direccion" -> copy(direccion = x); "forma" -> copy(forma = x); "densidad" -> copy(densidad = x); "ancho" -> copy(ancho = x)
+            "fotoProducto" -> copy(fotoProducto = x); "encabezado" -> copy(encabezado = x); "pie" -> copy(pie = x); else -> this
+        }
+    }
+
+    /** Para mandarlo dentro del diseño: sin lo vacío (Go lo limpia igual). En v2 ya no van textos ni anuncio. */
     val json: ValorJSON get() {
+        val mensajes = barra?.mensajes?.filter { it.texto.isNotBlank() }?.map { it.copy(link = it.link?.trim()?.ifEmpty { null }) }
         val e = copy(
             colores = colores?.filter { it.value.isNotEmpty() },
-            textos = textos?.filter { it.value.trim().isNotEmpty() },
+            textos = null, anuncio = null, anuncioLink = null,
             redes = redes?.filter { it.value.trim().isNotEmpty() },
             logoAlto = if (logoAlto == 0) null else logoAlto,
+            barra = if (mensajes.isNullOrEmpty()) null else barra?.copy(mensajes = mensajes),
+            whatsappFlotante = if (whatsappFlotante == false) false else null,
         )
         return runCatching { Api.json.encodeToJsonElement(serializer(), e) }.getOrDefault(Valor.objeto(emptyMap()))
     }
@@ -107,7 +141,6 @@ data class CatalogoEstilo(
             "encabezado" to "Fondo del encabezado", "encabezadoTexto" to "Texto del encabezado",
             "pie" to "Fondo del pie", "pieTexto" to "Texto del pie",
         )
-        val titulos = listOf("cats" to "Categorías", "prods" to "Productos destacados", "revs" to "Reseñas", "ig" to "Fotos")
         data class Red(val id: String, val nombre: String, val ejemplo: String, val teclado: KeyboardType)
         val redes = listOf(
             Red("instagram", "Instagram", "@tutienda", KeyboardType.Text), Red("tiktok", "TikTok", "@tutienda", KeyboardType.Text),
@@ -181,7 +214,7 @@ fun SelectorDeColor(nombre: String, hexActual: String, alCambiar: (String) -> Un
 /** Los grupos del estilo, para Mi tienda (los mismos de la web). */
 @Composable
 fun EditorEstilo(estilo: EstiloTienda, alCambiar: (EstiloTienda) -> Unit, paleta: Int, alCambiarPaleta: (Int) -> Unit, plantilla: String, categorias: List<String>) {
-    var abierto by remember { mutableStateOf<String?>("colores") }
+    var abierto by remember { mutableStateOf<String?>("direccion") }
     val cat = CatalogoEstilo.compartido
     val original = cat.roles[plantilla] ?: cat.roles["litoral"] ?: emptyMap()
 
@@ -223,7 +256,35 @@ fun EditorEstilo(estilo: EstiloTienda, alCambiar: (EstiloTienda) -> Unit, paleta
 
     val destinos = cat.paginas.map { it.id to it.nombre } + categorias.map { "cat:$it" to "Categoría: $it" } + listOf("link" to "Un link propio…")
 
+    // MARK: Dirección, forma, densidad, ancho y fotos (bloques.json › estilo)
+    val preset = PresetTienda.todos[plantilla]
+    val bloques = CatalogoBloques.shared
+
+    /** Lo que se ve: lo elegido, lo del punto de partida o lo de la dirección. */
+    fun vistoEstilo(k: String): String {
+        estilo.opcion(k)?.let { return it }
+        if (k == "direccion") return preset?.direccion ?: bloques.estilo[k]?.porDefecto ?: "vidriera"
+        return preset?.estilo?.get(k) ?: bloques.estilo[k]?.porDefecto ?: bloques.estilo[k]?.opciones?.firstOrNull() ?: ""
+    }
+
+    @Composable
+    fun OpcionEstilo(k: String, titulo: String) {
+        val o = bloques.estilo[k]
+        SelectorOpcion(titulo, o?.opciones ?: emptyList(), o?.nombres ?: emptyList(), vistoEstilo(k)) { alCambiar(estilo.conOpcion(k, it)) }
+    }
+
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+        Grupo("direccion", "Dirección y forma", "square.on.circle") {
+            Texto("La dirección le da el carácter: tipografía, aire y forma de botones. Cambiarla no borra nada.", Estilo.footnote, C.texto2)
+            OpcionEstilo("direccion", "Dirección")
+            OpcionEstilo("forma", "Forma de botones y tarjetas")
+            OpcionEstilo("densidad", "Aire entre bloques")
+            OpcionEstilo("ancho", "Ancho en la compu")
+            OpcionEstilo("fotoProducto", "Fotos de producto")
+            if (estilo.direccion != null || estilo.forma != null || estilo.densidad != null || estilo.ancho != null || estilo.fotoProducto != null) {
+                BotonTexto("Volver a lo del punto de partida", { alCambiar(estilo.copy(direccion = null, forma = null, densidad = null, ancho = null, fotoProducto = null)) })
+            }
+        }
         Grupo("colores", "Colores", "paintpalette") {
             Texto("Acento rápido", Estilo.footnoteFuerte, C.texto2)
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -281,6 +342,11 @@ fun EditorEstilo(estilo: EstiloTienda, alCambiar: (EstiloTienda) -> Unit, paleta
                 SelectorMenu(opciones, estilo.fuenteTexto ?: "", { alCambiar(estilo.copy(fuenteTexto = it.ifEmpty { null })) }, "Texto")
             }
         }
+        Grupo("encabezado", "Encabezado y pie", "rectangle.topthird.inset.filled") {
+            OpcionEstilo("encabezado", "Encabezado")
+            OpcionEstilo("pie", "Pie")
+            CampoTexto("Línea del pie", estilo.leyendaPie ?: "", { alCambiar(estilo.copy(leyendaPie = it.take(160))) })
+        }
         Grupo("menu", "Menú", "line.3.horizontal") {
             val items = estilo.menu ?: emptyList()
             fun cambiarItem(i: Int, f: (EstiloTienda.ItemMenu) -> EstiloTienda.ItemMenu) {
@@ -325,45 +391,34 @@ fun EditorEstilo(estilo: EstiloTienda, alCambiar: (EstiloTienda) -> Unit, paleta
             }
             if (items.isNotEmpty()) BotonTexto("Volver al menú de la plantilla", { alCambiar(estilo.copy(menu = null)) })
         }
-        Grupo("titulos", "Títulos de las secciones", "textformat.size") {
-            CatalogoEstilo.titulos.forEach { (id, nombre) ->
-                CampoTexto("$nombre (vacío: el de la plantilla)", estilo.textos?.get(id) ?: "", { v -> alCambiar(estilo.copy(textos = (estilo.textos ?: emptyMap()) + (id to v.take(60)))) })
+        Grupo("barra", "Barra de anuncios", "megaphone") {
+            val b = bloques.barraAnuncios
+            val actual = estilo.barra ?: EstiloTienda.Barra(b.variantes.firstOrNull() ?: "fija", emptyList())
+            Texto(b.descripcion, Estilo.footnote, C.texto2)
+            SelectorOpcion("Cómo se ve", b.variantes, b.nombresVariantes, actual.variante) { v -> alCambiar(estilo.copy(barra = actual.copy(variante = v))) }
+            val datos = buildMap {
+                if (actual.mensajes.isNotEmpty()) put("mensajes", valorDe(ListSerializer(EstiloTienda.Barra.Mensaje.serializer()), actual.mensajes))
+                actual.fondo?.let { put("fondo", Valor.texto(it)) }
+            }
+            EditorCampos(b.campos, datos) { d ->
+                val n = actual.copy(
+                    mensajes = d["mensajes"]?.lista?.map { m -> EstiloTienda.Barra.Mensaje(m["texto"]?.texto ?: "", m["link"]?.texto) } ?: emptyList(),
+                    fondo = d["fondo"]?.texto,
+                )
+                alCambiar(estilo.copy(barra = if (n.mensajes.isEmpty() && n.fondo == null) null else n))
+            }
+            if (actual.variante == "rotativa" && actual.mensajes.size < 2) {
+                Texto("Rotativa pasa de un mensaje al otro: sumá al menos dos.", Estilo.footnote, C.avisoTinta)
             }
         }
-        Grupo("anuncio", "Anuncio y pie", "megaphone") {
-            CampoTexto("Barra de anuncio (arriba de todo)", estilo.anuncio ?: "", { alCambiar(estilo.copy(anuncio = it.take(120))) })
-            CampoTexto("Link del anuncio (opcional)", estilo.anuncioLink ?: "", { alCambiar(estilo.copy(anuncioLink = it.trim())) }, teclado = KeyboardType.Uri)
-            CampoTexto("Línea del pie", estilo.leyendaPie ?: "", { alCambiar(estilo.copy(leyendaPie = it.take(160))) })
-        }
-        Grupo("redes", "Redes y contacto", "at") {
+        Grupo("redes", "Redes y WhatsApp", "at") {
             CatalogoEstilo.redes.forEach { r ->
                 CampoTexto(r.nombre, estilo.redes?.get(r.id) ?: "", { v -> alCambiar(estilo.copy(redes = (estilo.redes ?: emptyMap()) + (r.id to v))) }, teclado = r.teclado)
             }
             Texto("Se muestran en el pie de tu tienda.", Estilo.footnote, C.texto2)
+            Interruptor("Botón flotante de WhatsApp", estilo.whatsappFlotante ?: true, { alCambiar(estilo.copy(whatsappFlotante = if (it) null else false)) })
+            Texto("Va abajo en todas las páginas, con el WhatsApp de Datos del negocio.", Estilo.footnote, C.texto2)
         }
     }
 }
 
-// MARK: - Vista previa
-
-/** La tienda de verdad con el borrador (la misma página que el editor web, /panel/mi-tienda/vista, con el token de la
- *  app). La página misma no deja navegar los links. */
-@SuppressLint("SetJavaScriptEnabled")
-@Composable
-fun VistaPreviaTienda(token: String?, vuelta: Int, modifier: Modifier = Modifier) {
-    var cargada by remember { mutableStateOf(-1) }
-    AndroidView({ c ->
-        WebView(c).apply {
-            settings.javaScriptEnabled = true
-            settings.domStorageEnabled = true
-            setBackgroundColor(android.graphics.Color.TRANSPARENT)
-            webViewClient = WebViewClient()
-        }
-    }, modifier, update = { w ->
-        if (cargada != vuelta) {
-            cargada = vuelta
-            w.clearCache(true)
-            w.loadUrl("${Web.base}/panel/mi-tienda/vista", token?.let { mapOf("Authorization" to "Bearer $it") } ?: emptyMap())
-        }
-    })
-}

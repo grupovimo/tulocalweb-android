@@ -12,23 +12,23 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -37,15 +37,20 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import ar.com.tulocalweb.app.app.LocalEstado
+import ar.com.tulocalweb.app.nucleo.CatalogoBloques
+import ar.com.tulocalweb.app.nucleo.ContextoTienda
+import ar.com.tulocalweb.app.nucleo.Diseno
 import ar.com.tulocalweb.app.nucleo.ErrorApi
 import ar.com.tulocalweb.app.nucleo.Fotos
+import ar.com.tulocalweb.app.nucleo.PresetTienda
 import ar.com.tulocalweb.app.nucleo.Recursos
 import ar.com.tulocalweb.app.nucleo.Valor
 import ar.com.tulocalweb.app.nucleo.ValorJSON
@@ -53,7 +58,6 @@ import ar.com.tulocalweb.app.nucleo.Web
 import ar.com.tulocalweb.app.nucleo.abrirEnNavegador
 import ar.com.tulocalweb.app.nucleo.bool
 import ar.com.tulocalweb.app.nucleo.compartirTexto
-import ar.com.tulocalweb.app.nucleo.entero
 import ar.com.tulocalweb.app.nucleo.get
 import ar.com.tulocalweb.app.nucleo.lista
 import ar.com.tulocalweb.app.nucleo.objeto
@@ -68,44 +72,37 @@ import kotlin.math.roundToInt
 
 // Clon de Pantallas/Mas/MiTienda.swift.
 
-private data class Seccion(val id: String, val visible: Boolean)
-private val nombresSecciones = mapOf("hero" to "Portada", "cats" to "Categorías", "prods" to "Productos", "revs" to "Reseñas", "ig" to "Instagram", "wa" to "Botón de WhatsApp")
-
-/** Editar la tienda online desde el celular, igual que Mi tienda en el panel web: plantilla, colores, tipografías,
- *  logos, portada, secciones, menú, títulos, anuncio, pie, redes, cómo se ve al compartir y la dirección. Se guarda como
- *  borrador, se mira en la vista previa real y se publica. */
+/** Editar la tienda online desde el celular, igual que Mi tienda en el panel web (diseño v2, en bloques): la vista
+ *  previa real arriba; Páginas (Inicio, Catálogo, Ficha, Carrito y Nosotros con sus bloques), Estilo (punto de
+ *  partida, dirección, colores, tipografías, encabezado, pie, menú, barra y redes) y Marca (logos, al compartir y la
+ *  dirección). Se guarda como borrador y se publica. */
 @Composable
 fun MiTiendaEditor() {
     val estado = LocalEstado.current
     val ctx = LocalContext.current
     val alcance = rememberCoroutineScope()
-    var diseno by remember { mutableStateOf<Map<String, ValorJSON>>(emptyMap()) }
+    val editor = remember { EditorTienda() }
+    val datos = remember { DatosEditor() }
     var cargado by remember { mutableStateOf(false) }
-    var plantilla by remember { mutableStateOf("") }
-    var paleta by remember { mutableIntStateOf(0) }
-    var titulo by remember { mutableStateOf("") }
-    var lema by remember { mutableStateOf("") }
-    var portada by remember { mutableStateOf("") }
-    var logo by remember { mutableStateOf("") }
-    var compartirTitulo by remember { mutableStateOf("") }
-    var compartirDescripcion by remember { mutableStateOf("") }
-    val secciones = remember { mutableStateListOf<Seccion>() }
+    var pestana by remember { mutableStateOf("paginas") }
     var direccion by remember { mutableStateOf("") }
     var slug by remember { mutableStateOf("") }
     var sinPublicar by remember { mutableStateOf(false) }
     var guardando by remember { mutableStateOf(false) }
     var subiendo by remember { mutableStateOf<String?>(null) }
-    var estilo by remember { mutableStateOf(EstiloTienda()) }
     var categorias by remember { mutableStateOf<List<String>>(emptyList()) }
-    var previa by remember { mutableStateOf(false) }
+    var previaGrande by remember { mutableStateOf(false) }
     var vuelta by remember { mutableIntStateOf(0) }
+    /** La vista previa responde al protocolo: los cambios se ven sin guardar. */
+    var viva by remember { mutableStateOf(false) }
+    var presetPedido by remember { mutableStateOf<PlantillaTienda?>(null) }
     val plantillas = remember { PlantillaTienda.todas() }
 
     val urlTienda: String? = if (direccion.isEmpty()) estado.tienda?.url else (if (direccion.startsWith("http")) direccion else "https://$direccion")
 
     suspend fun subir(u: Uri?, que: String): String? {
         u ?: return null
-        subiendo = if (que == "portada") "foto de portada" else que
+        subiendo = que
         try {
             val jpg = Fotos.achicar(ctx, u, 1600, 85) ?: return null
             return Web.subirFoto(jpg, estado.api.token)
@@ -114,45 +111,51 @@ fun MiTiendaEditor() {
         } finally { subiendo = null }
     }
 
+    // MARK: Cargar y guardar
+
     suspend fun cargar() {
         val v = estado.api.opcional<ValorJSON>("/v1/panel/mi-tienda")
         if (v == null) { estado.avisar("No pudimos traer tu tienda", ok = false); cargado = true; return }
-        v["diseno"]?.objeto?.let { diseno = it }
-        plantilla = v["plantillaId"]?.texto ?: ""
+        val plantilla = v["plantillaId"]?.texto ?: v["plantilla"]?.texto ?: ""
+        editor.empezar(Diseno.desde(v["diseno"]?.objeto ?: emptyMap(), plantilla), plantilla)
         direccion = v["direccion"]?.texto ?: ""
         sinPublicar = v["sinPublicar"]?.bool ?: false
-        paleta = diseno["paleta"]?.entero ?: 0
-        titulo = diseno["titulo"]?.texto ?: ""
-        lema = diseno["lema"]?.texto ?: ""
-        portada = diseno["portada"]?.texto ?: ""
-        logo = diseno["logo"]?.texto ?: ""
-        compartirTitulo = diseno["compartirTitulo"]?.texto ?: ""
-        compartirDescripcion = diseno["compartirDescripcion"]?.texto ?: ""
-        secciones.clear(); secciones.addAll(diseno["secciones"]?.lista?.mapNotNull { s -> s["id"]?.texto?.let { Seccion(it, s["visible"]?.bool ?: true) } } ?: emptyList())
-        estilo = EstiloTienda.desde(diseno["estilo"])
         categorias = v["vista"]?.get("categorias")?.lista?.mapNotNull { it.texto } ?: emptyList()
+        val productos = v["vista"]?.get("productos")?.lista ?: emptyList()
+        datos.contexto = ContextoTienda(
+            nombre = estado.tienda?.nombre ?: "",
+            categorias = categorias,
+            productos = productos.size,
+            resenas = v["vista"]?.get("resena")?.objeto != null,
+            fotos = !(v["vista"]?.get("fotos")?.lista ?: emptyList()).isEmpty() || productos.any { !(it["foto"]?.texto ?: "").isEmpty() },
+        )
         slug = estado.tienda?.slug ?: ""
         cargado = true
+        // Lo que sólo hace falta para los avisos y los selectores: después de mostrar el editor.
+        estado.api.opcional<ValorJSON>("/v1/panel/configuracion")?.get("negocio")?.let { n ->
+            datos.contexto = datos.contexto.copy(
+                whatsapp = !(n["whatsapp"]?.texto ?: "").isBlank(),
+                direccionLocal = !(n["direccion"]?.texto ?: "").isBlank(),
+            )
+        }
+        datos.cargarProductos(estado.api)
     }
 
     suspend fun guardar(publicar: Boolean, avisar: Boolean = true): Boolean {
+        val d = editor.diseno
+        val cuerpo = Valor.objeto(d.json)
+        if (cuerpo.toString().toByteArray().size > CatalogoBloques.shared.limites.bytesDiseno) {
+            estado.avisar("Tu tienda quedó muy grande: sacá algunos bloques o textos largos", ok = false)
+            return false
+        }
         guardando = true
         try {
-            val d = diseno.toMutableMap()
-            d["plantilla"] = Valor.texto(plantilla)
-            d["paleta"] = Valor.numero(paleta)
-            d["titulo"] = Valor.texto(titulo)
-            d["lema"] = Valor.texto(lema)
-            d["portada"] = Valor.texto(portada)
-            d["logo"] = Valor.texto(logo)
-            d["compartirTitulo"] = Valor.texto(compartirTitulo)
-            d["compartirDescripcion"] = Valor.texto(compartirDescripcion)
-            d["secciones"] = Valor.lista(secciones.map { Valor.objeto(mapOf("id" to Valor.texto(it.id), "visible" to Valor.booleano(it.visible))) })
-            d["estilo"] = estilo.json
-            estado.api.hacer("PUT", "/v1/panel/mi-tienda", Valor.objeto(d))
-            // El logo nuevo se ve enseguida en Inicio y en Más (en vez de las iniciales).
-            if (d["logo"]?.texto != estado.tienda?.logo) estado.tarea { estado.refrescarAcceso() }
-            diseno = d
+            if (editor.sinGuardar || !publicar) {
+                estado.api.hacer("PUT", "/v1/panel/mi-tienda", cuerpo)
+                editor.guardado = d
+                // El logo nuevo se ve enseguida en Inicio y en Más (en vez de las iniciales).
+                if (d.logo != (estado.tienda?.logo ?: "")) estado.tarea { estado.refrescarAcceso() }
+            }
             if (publicar) {
                 estado.api.hacer("POST", "/v1/panel/mi-tienda/publicar")
                 sinPublicar = false
@@ -169,8 +172,14 @@ fun MiTiendaEditor() {
         return false
     }
 
-    /** Guarda el borrador y abre la tienda de verdad con él. */
-    suspend fun mirar() { if (guardar(publicar = false, avisar = false)) { vuelta += 1; previa = true } }
+    /** Sin la vista conectada: guarda el borrador y recarga la tienda con él. */
+    suspend fun mirar(grande: Boolean) {
+        if (!viva || grande) {
+            if (editor.sinGuardar && !guardar(publicar = false, avisar = false)) return
+            if (!viva) vuelta += 1
+        }
+        if (grande) previaGrande = true
+    }
 
     @Serializable data class C2(val slug: String)
     suspend fun cambiarDireccion() {
@@ -184,10 +193,26 @@ fun MiTiendaEditor() {
         }
     }
 
-    val elegirPortada = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> alcance.launch { subir(u, "portada")?.let { portada = it } } }
-    val elegirLogo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> alcance.launch { subir(u, "logo")?.let { logo = it } } }
-    val elegirLogoOscuro = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> alcance.launch { subir(u, "logo para fondos oscuros")?.let { estilo = estilo.copy(logoOscuro = it) } } }
-    val elegirIcono = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u -> alcance.launch { subir(u, "ícono de la pestaña")?.let { estilo = estilo.copy(icono = it) } } }
+    fun nombreDireccion(plantilla: String): String {
+        val d = PresetTienda.todos[plantilla]?.direccion ?: ""
+        return CatalogoBloques.shared.estilo["direccion"]?.let { CatalogoBloques.nombre(it, d) } ?: d
+    }
+
+    fun cambiarPreset(p: PlantillaTienda) {
+        editor.aplicarPreset(p.id)
+        Haptico.exito()
+        estado.avisar("Pasamos a «${p.nombre}»", deshacer = { editor.deshacer() })
+    }
+
+    val elegirLogo = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u ->
+        alcance.launch { subir(u, "logo")?.let { url -> editor.cambiar { it.copy(logo = url) } } }
+    }
+    val elegirLogoOscuro = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u ->
+        alcance.launch { subir(u, "logo para fondos oscuros")?.let { url -> editor.cambiar { it.copy(estilo = it.estilo.copy(logoOscuro = url)) } } }
+    }
+    val elegirIcono = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { u ->
+        alcance.launch { subir(u, "ícono de la pestaña")?.let { url -> editor.cambiar { it.copy(estilo = it.estilo.copy(icono = url)) } } }
+    }
     val soloImagenes = PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
 
     @Composable
@@ -195,139 +220,144 @@ fun MiTiendaEditor() {
         Column(modifier.clip(RoundedCornerShape(14.dp)).background(C.crema2).clickable(onClick = elegir).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(6.dp)) {
             when {
-                subiendo == titulo.lowercase() -> Box(Modifier.height(70.dp), contentAlignment = Alignment.Center) { Rueda(C.acento) }
-                url.isNotEmpty() -> AsyncImage(url, null, Modifier.fillMaxWidth().height(70.dp).clip(RoundedCornerShape(10.dp)).background(if (oscuro) hex(0x1C1A17) else Color.Transparent),
-                    contentScale = ContentScale.Crop)
-                else -> Box(Modifier.height(70.dp), contentAlignment = Alignment.Center) { Icono("photo.badge.plus", 22f, C.primarioTexto) }
+                subiendo == titulo.lowercase() -> Box(Modifier.height(60.dp), contentAlignment = Alignment.Center) { Rueda(C.acento) }
+                url.isNotEmpty() -> AsyncImage(url, null, Modifier.fillMaxWidth().height(60.dp).clip(RoundedCornerShape(10.dp))
+                    .background(if (oscuro) hex(0x1C1A17) else Color.Transparent).padding(4.dp), contentScale = ContentScale.Fit)
+                else -> Box(Modifier.height(60.dp), contentAlignment = Alignment.Center) { Icono("photo.badge.plus", 22f, C.primarioTexto) }
             }
-            Texto(titulo, Estilo.footnoteFuerte, C.primarioTinta, alinear = TextAlign.Center)
+            Texto(titulo, Estilo.footnoteFuerte, C.primarioTinta, alinear = TextAlign.Center, lineas = 2, escalaMinima = 0.85f)
         }
     }
 
     LaunchedEffect(Unit) { cargar() }
 
-    ConBarraAccion({
-        if (cargado) {
-            BotonPrincipal(if (guardando) "Publicando…" else "Publicar cambios", { alcance.launch { guardar(publicar = true) } }, habilitado = !guardando && subiendo == null)
-            BotonTexto("Guardar borrador", { alcance.launch { guardar(publicar = false) } }, habilitado = !guardando && subiendo == null)
-        }
-    }, Modifier.background(C.fondo).imePadding()) { abajo ->
-        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).margenPantalla().padding(bottom = 32.dp + abajo), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            Texto("Mi tienda", Estilo.tituloGrande, C.texto)
-            if (!cargado) EsqueletoFilas(5, 0.dp)
-            else {
-                // La vista previa
-                val p = plantillas.firstOrNull { it.id == plantilla }
-                Column(Modifier.fillMaxWidth().tarjeta(radio = 20.dp)) {
-                    Box(Modifier.fillMaxWidth().height(170.dp).background(hex(p?.colorFondo ?: 0xF4EFEA))) {
-                        AsyncImage(portada.ifEmpty { p?.img ?: "" }, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-                        Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.5f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.55f))))
-                        Row(Modifier.align(Alignment.BottomStart).padding(14.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.Bottom) {
-                            if (logo.isNotEmpty()) AsyncImage(logo, null, Modifier.size(44.dp).clip(RoundedCornerShape(10.dp)).background(Color.White), contentScale = ContentScale.Fit)
-                            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                Texto(titulo.ifEmpty { estado.tienda?.nombre ?: "" }, Estilo(20f, Peso.bold), Color.White)
-                                if (lema.isNotEmpty()) Texto(lema, Estilo.footnote, Color.White.copy(alpha = 0.9f))
+    CompositionLocalProvider(LocalDatosEditor provides datos) {
+        ConBarraAccion({
+            if (cargado) {
+                BotonPrincipal(if (guardando) "Publicando…" else "Publicar cambios", { alcance.launch { guardar(publicar = true) } }, habilitado = !guardando && subiendo == null)
+                BotonTexto(if (editor.sinGuardar) "Guardar borrador" else "Borrador guardado", { alcance.launch { guardar(publicar = false) } },
+                    habilitado = !guardando && subiendo == null && editor.sinGuardar)
+            }
+        }, Modifier.background(C.fondo).imePadding()) { abajo ->
+            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).margenPantalla().padding(bottom = 32.dp + abajo), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                Texto("Mi tienda", Estilo.tituloGrande, C.texto)
+                if (!cargado) EsqueletoFilas(5, 0.dp)
+                else {
+                    // MARK: Vista previa
+                    Column(Modifier.fillMaxWidth().tarjeta(radio = 20.dp)) {
+                        VistaPreviaTienda(estado.api.token, vuelta, Modifier.fillMaxWidth().height(380.dp).clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(C.pista),
+                            pagina = editor.pagina, diseno = editor.diseno.textoJSON, seleccion = editor.seleccion, marcos = true,
+                            alTocarBloque = { id -> editor.abrir(id); pestana = "paginas" }, alCambiarViva = { viva = it })
+                        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            when {
+                                editor.sinGuardar && !viva -> ChipSimple("Guardá para verlo", C.avisoFondo, C.avisoTinta)
+                                sinPublicar || editor.sinGuardar -> ChipSimple("Hay cambios sin publicar", C.avisoFondo, C.avisoTinta)
+                                else -> ChipSimple("Publicada", C.okFondo, C.okTinta)
                             }
-                        }
-                    }
-                    Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        if (sinPublicar) ChipSimple("Hay cambios sin publicar", C.avisoFondo, C.avisoTinta) else ChipSimple("Publicada", C.okFondo, C.okTinta)
-                        androidx.compose.foundation.layout.Spacer(Modifier.weight(1f))
-                        Texto("Vista previa", Estilo.subheadFuerte, C.primarioTexto, Modifier.alpha(if (guardando || subiendo != null) 0.4f else 1f)
-                            .clickable(enabled = !guardando && subiendo == null) { alcance.launch { mirar() } })
-                        Texto("Ver tienda", Estilo.subheadFuerte, C.primarioTexto, Modifier.clickable { urlTienda?.let { abrirEnNavegador(ctx, it) } })
-                    }
-                    if (urlTienda != null && !sinPublicar) {
-                        Row(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            BotonTonal("Copiar link", { Compartir.copiar(ctx, urlTienda, estado) }, Modifier.weight(1f), alto = 38.dp, lleno = true, simbolo = "doc.on.doc")
-                            estado.tienda?.let { t ->
-                                BotonTonal("Compartir", { compartirTexto(ctx, Compartir.mensajeTienda(t)) }, Modifier.weight(1f), alto = 38.dp, lleno = true, simbolo = "square.and.arrow.up")
+                            Spacer(Modifier.weight(1f))
+                            if (!viva) {
+                                Texto("Actualizar", Estilo.subheadFuerte, C.primarioTexto, Modifier.alpha(if (guardando || subiendo != null) 0.4f else 1f)
+                                    .clickable(enabled = !guardando && subiendo == null) { alcance.launch { mirar(grande = false) } })
                             }
+                            Box(Modifier.clickable { alcance.launch { mirar(grande = true) } }.semantics { contentDescription = "Ver en grande" }) {
+                                Icono("arrow.up.left.and.arrow.down.right", 15f, C.primarioTexto)
+                            }
+                            Texto("Ver tienda", Estilo.subheadFuerte, C.primarioTexto, Modifier.clickable { urlTienda?.let { abrirEnNavegador(ctx, it) } })
                         }
-                    }
-                }
-                TarjetaSeccion("Plantilla", "rectangle.3.group") {
-                    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        plantillas.forEach { pl ->
-                            Column(Modifier.width(120.dp).clickable { plantilla = pl.id }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                val forma = RoundedCornerShape(14.dp)
-                                Box(Modifier.size(120.dp, 150.dp).clip(forma).background(hex(pl.colorFondo)).border(3.dp, if (plantilla == pl.id) C.acento else Color.Transparent, forma)) {
-                                    AsyncImage(pl.img, null, Modifier.fillMaxSize().clip(forma), contentScale = ContentScale.Crop)
-                                    Texto(pl.lema, Estilo(11f, Peso.semibold), Color.White, Modifier.align(Alignment.BottomStart).padding(6.dp))
+                        if (urlTienda != null && !sinPublicar && !editor.sinGuardar) {
+                            Row(Modifier.padding(horizontal = 12.dp).padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                BotonTonal("Copiar link", { Compartir.copiar(ctx, urlTienda, estado) }, Modifier.weight(1f), alto = 38.dp, lleno = true, simbolo = "doc.on.doc")
+                                estado.tienda?.let { t ->
+                                    BotonTonal("Compartir", { compartirTexto(ctx, Compartir.mensajeTienda(t)) }, Modifier.weight(1f), alto = 38.dp, lleno = true, simbolo = "square.and.arrow.up")
                                 }
-                                Texto(pl.nombre, Estilo.fila, C.texto)
-                                Texto(pl.rubro, Estilo.footnote, C.texto2)
                             }
                         }
                     }
-                }
-                TarjetaSeccion("Portada", "photo.on.rectangle") {
-                    CampoTexto("Título (vacío: el nombre de la tienda)", titulo, { titulo = it })
-                    CampoTexto("Lema", lema, { lema = it })
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SelectorFoto("Foto de portada", portada, Modifier.weight(1f)) { elegirPortada.launch(soloImagenes); estado.abrioOtraApp = true }
-                        SelectorFoto("Logo", logo, Modifier.weight(1f)) { elegirLogo.launch(soloImagenes); estado.abrioOtraApp = true }
-                    }
-                }
-                TarjetaSeccion("Logos", "seal") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        SelectorFoto("Logo para fondos oscuros", estilo.logoOscuro ?: "", Modifier.weight(1f), oscuro = true) { elegirLogoOscuro.launch(soloImagenes); estado.abrioOtraApp = true }
-                        SelectorFoto("Ícono de la pestaña", estilo.icono ?: "", Modifier.weight(1f)) { elegirIcono.launch(soloImagenes); estado.abrioOtraApp = true }
-                    }
-                    if (logo.isNotEmpty()) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Texto("Tamaño del logo · ${estilo.logoAlto?.let { "$it px" } ?: "el de la plantilla"}", Estilo.footnoteFuerte, C.texto2)
-                            Deslizador((estilo.logoAlto ?: 36).toFloat(), { estilo = estilo.copy(logoAlto = it.roundToInt()) }, 24f..72f, 2f)
-                        }
-                    }
-                    if (!estilo.logoOscuro.isNullOrEmpty() || !estilo.icono.isNullOrEmpty()) {
-                        Row(Modifier.fillMaxWidth()) {
-                            if (!estilo.logoOscuro.isNullOrEmpty()) BotonTexto("Quitar logo oscuro", { estilo = estilo.copy(logoOscuro = null) }, Modifier.weight(1f))
-                            if (!estilo.icono.isNullOrEmpty()) BotonTexto("Quitar ícono", { estilo = estilo.copy(icono = null) }, Modifier.weight(1f))
-                        }
-                    }
-                }
-                TarjetaSeccion("Secciones", "list.bullet.rectangle") {
-                    Column {
-                        secciones.toList().forEachIndexed { i, s ->
-                            if (i > 0) Separador()
-                            Row(Modifier.padding(vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                    Box(Modifier.alpha(if (i == 0) 0.3f else 1f).clickable(enabled = i > 0) { val x = secciones[i]; secciones[i] = secciones[i - 1]; secciones[i - 1] = x }) {
-                                        Icono("chevron.up", 12f, C.primarioTexto)
+                    Segmentado(listOf("paginas" to "Páginas", "estilo" to "Estilo", "marca" to "Marca"), pestana, { pestana = it })
+                    when (pestana) {
+                        "estilo" -> {
+                            // MARK: Estilo
+                            TarjetaSeccion("Punto de partida", "rectangle.3.group") {
+                                Texto("Cada uno trae su dirección, sus colores y sus bloques. Cambiarlo conserva tus textos y fotos.", Estilo.footnote, C.texto2)
+                                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    plantillas.forEach { p ->
+                                        Column(Modifier.width(120.dp).clickable { if (p.id != editor.plantilla) presetPedido = p }, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                            val forma = RoundedCornerShape(14.dp)
+                                            Box(Modifier.size(120.dp, 150.dp).clip(forma).background(hex(p.colorFondo)).border(3.dp, if (editor.plantilla == p.id) C.acento else Color.Transparent, forma)) {
+                                                AsyncImage(p.img, null, Modifier.fillMaxSize().clip(forma), contentScale = ContentScale.Crop)
+                                                Texto(p.lema, Estilo(11f, Peso.semibold), Color.White, Modifier.align(Alignment.BottomStart).padding(6.dp))
+                                            }
+                                            Texto(p.nombre, Estilo.fila, C.texto)
+                                            Texto(nombreDireccion(p.id), Estilo.footnote, C.texto2)
+                                        }
                                     }
-                                    Box(Modifier.alpha(if (i == secciones.size - 1) 0.3f else 1f).clickable(enabled = i < secciones.size - 1) {
-                                        val x = secciones[i]; secciones[i] = secciones[i + 1]; secciones[i + 1] = x
-                                    }) { Icono("chevron.down", 12f, C.primarioTexto) }
                                 }
-                                Texto(nombresSecciones[s.id] ?: s.id, Estilo.body16, C.texto, Modifier.weight(1f))
-                                Llave(s.visible, { v -> secciones[i] = s.copy(visible = v) })
+                            }
+                            EditorEstilo(editor.diseno.estilo, { e -> editor.cambiar("estilo") { it.copy(estilo = e) } }, editor.diseno.paleta,
+                                { p -> editor.cambiar("paleta") { it.copy(paleta = p) } }, editor.plantilla, categorias)
+                        }
+                        "marca" -> {
+                            // MARK: Marca
+                            val d = editor.diseno
+                            TarjetaSeccion("Nombre y logo", "seal") {
+                                CampoTexto("Nombre que se ve (vacío: el de la tienda)", d.titulo, { v -> editor.cambiar("titulo") { it.copy(titulo = v) } })
+                                CampoTexto("Frase", d.lema, { v -> editor.cambiar("lema") { it.copy(lema = v) } })
+                                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    SelectorFoto("Logo", d.logo, Modifier.weight(1f)) { elegirLogo.launch(soloImagenes); estado.abrioOtraApp = true }
+                                    SelectorFoto("Logo para fondos oscuros", d.estilo.logoOscuro ?: "", Modifier.weight(1f), oscuro = true) { elegirLogoOscuro.launch(soloImagenes); estado.abrioOtraApp = true }
+                                    SelectorFoto("Ícono de la pestaña", d.estilo.icono ?: "", Modifier.weight(1f)) { elegirIcono.launch(soloImagenes); estado.abrioOtraApp = true }
+                                }
+                                if (d.logo.isNotEmpty()) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Texto("Tamaño del logo · ${d.estilo.logoAlto?.let { "$it px" } ?: "el de la dirección"}", Estilo.footnoteFuerte, C.texto2)
+                                        Deslizador((d.estilo.logoAlto ?: 36).toFloat(), { v -> editor.cambiar("logoAlto") { it.copy(estilo = it.estilo.copy(logoAlto = v.roundToInt())) } }, 24f..72f, 2f)
+                                    }
+                                }
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    if (d.logo.isNotEmpty()) Texto("Quitar logo", Estilo.footnoteFuerte, C.primarioTexto, Modifier.clickable { editor.cambiar { it.copy(logo = "") } })
+                                    Spacer(Modifier.weight(1f))
+                                    if (!d.estilo.logoOscuro.isNullOrEmpty()) Texto("Quitar logo oscuro", Estilo.footnoteFuerte, C.primarioTexto,
+                                        Modifier.clickable { editor.cambiar { it.copy(estilo = it.estilo.copy(logoOscuro = null)) } })
+                                    Spacer(Modifier.weight(1f))
+                                    if (!d.estilo.icono.isNullOrEmpty()) Texto("Quitar ícono", Estilo.footnoteFuerte, C.primarioTexto,
+                                        Modifier.clickable { editor.cambiar { it.copy(estilo = it.estilo.copy(icono = null)) } })
+                                }
+                            }
+                            TarjetaSeccion("Al compartir el link", "square.and.arrow.up") {
+                                CampoTexto("Título (vacío: el sugerido)", d.compartirTitulo, { v -> editor.cambiar("compartirTitulo") { it.copy(compartirTitulo = v) } })
+                                CampoTexto("Descripción", d.compartirDescripcion, { v -> editor.cambiar("compartirDescripcion") { it.copy(compartirDescripcion = v) } })
+                            }
+                            TarjetaSeccion("Dirección de tu tienda", "link") {
+                                SelectionContainer { Texto(direccion, Estilo.texto14, C.primarioTexto) }
+                                CampoTexto("Nombre en la dirección (letras, números y guiones)", slug, { slug = it })
+                                BotonSecundario("Cambiar dirección", { alcance.launch { cambiarDireccion() } }, habilitado = slug.isNotEmpty() && !direccion.contains(slug))
                             }
                         }
+                        else -> ListaBloques(editor)
                     }
                 }
-                EditorEstilo(estilo, { estilo = it }, paleta, { paleta = it }, plantilla, categorias)
-                TarjetaSeccion("Al compartir el link", "square.and.arrow.up") {
-                    CampoTexto("Título (vacío: el sugerido)", compartirTitulo, { compartirTitulo = it })
-                    CampoTexto("Descripción", compartirDescripcion, { compartirDescripcion = it })
-                }
-                TarjetaSeccion("Dirección de tu tienda", "link") {
-                    SelectionContainer { Texto(direccion, Estilo.texto14, C.primarioTexto) }
-                    CampoTexto("Nombre en la dirección (letras, números y guiones)", slug, { slug = it })
-                    BotonSecundario("Cambiar dirección", { alcance.launch { cambiarDireccion() } }, habilitado = slug.isNotEmpty() && !direccion.contains(slug))
-                }
             }
         }
-    }
-    // La vista previa real, a pantalla completa con «Listo» (la hoja con NavigationStack de iOS).
-    Hoja(previa, { previa = false }) {
-        Column(Modifier.fillMaxSize()) {
-            Box(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 16.dp)) {
-                Texto("Así se ve", Estilo.headline, C.texto, Modifier.align(Alignment.Center))
-                Texto("Listo", Estilo(17f, Peso.semibold), C.primarioTexto, Modifier.align(Alignment.CenterEnd).clickable { previa = false })
-            }
-            VistaPreviaTienda(estado.api.token, vuelta, Modifier.fillMaxSize())
+        Hoja(editor.panel != null, { editor.panel = null }, listOf(Altura.media, Altura.grande)) {
+            editor.panel?.let { id -> PanelBloque(editor, id) { editor.panel = null } }
         }
+        Hoja(editor.insertarEn != null, { editor.insertarEn = null }) {
+            BibliotecaBloques(editor) { editor.insertarEn = null }
+        }
+        // La vista previa en grande (la hoja con NavigationStack de iOS).
+        Hoja(previaGrande, { previaGrande = false }) {
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.fillMaxWidth().height(44.dp).padding(horizontal = 16.dp)) {
+                    Texto("Así se ve", Estilo.headline, C.texto, Modifier.align(Alignment.Center))
+                    Texto("Listo", Estilo(17f, Peso.semibold), C.primarioTexto, Modifier.align(Alignment.CenterEnd).clickable { previaGrande = false })
+                }
+                VistaPreviaTienda(estado.api.token, vuelta, Modifier.fillMaxSize(), pagina = editor.pagina, diseno = editor.diseno.textoJSON)
+            }
+        }
+        val p = presetPedido
+        Confirmacion(p != null, p?.let { "¿Pasar a «${it.nombre}»?" } ?: "",
+            "Cambian la dirección, el orden y el diseño de los bloques. Tus textos y fotos quedan, y podés deshacerlo.",
+            listOfNotNull(p?.let { OpcionConfirmacion("Pasar a ${it.nombre}") { cambiarPreset(it) } }), { presetPedido = null }, volver = "Cancelar")
     }
 }
 
