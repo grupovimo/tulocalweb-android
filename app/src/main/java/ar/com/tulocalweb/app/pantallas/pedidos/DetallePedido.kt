@@ -84,11 +84,14 @@ fun DetallePedido(numero: Int) {
         return t
     }
 
-    suspend fun cargar() {
+    /** `trasCambio`: después de cancelar no se puede seguir mostrando el pedido de antes (con sus botones):
+     *  si no se pudo traer, va el error con reintentar. En una actualización común queda lo que había y se avisa. */
+    suspend fun cargar(trasCambio: Boolean = false) {
         try {
             carga = Carga.listo(estado.api.get("/v1/panel/pedidos/$numero"))
         } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) {
-            if (carga.valor == null || e !is ErrorApi) carga = Carga.error(errorDe(e))
+            val err = errorDe(e)
+            if (carga.valor == null || trasCambio) carga = Carga.error(err) else if (!err.sinSesion) estado.avisar("No pudimos actualizar el pedido", ok = false)
         }
     }
 
@@ -144,7 +147,7 @@ fun DetallePedido(numero: Int) {
                         Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(top = 10.dp).margenPantalla().padding(bottom = 16.dp),
                             verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                ChipEstado(p.estado, p.envio, p.pago, p.canal, grande = true)
+                                ChipEstado(p.estado, p.envio, p.pago, p.canal, grande = true, estadoPago = p.estadoPago)
                                 Texto(Formato.pesos(p.total), Estilo.montoPantalla, C.texto, numeros = true)
                                 Texto("${Formato.cuando(p.creado)} · ${Marcas.canal(p.canal)} · ${Formato.cantidad(p.cantidadProductos, "producto", "productos")}", Estilo.subhead, C.texto2)
                             }
@@ -163,15 +166,16 @@ fun DetallePedido(numero: Int) {
                                 Box(Modifier.fillMaxWidth().tarjeta().padding(horizontal = 16.dp, vertical = 14.dp)) {
                                     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(C.crema2).padding(horizontal = 12.dp, vertical = 10.dp),
                                         verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        // Sin firma: la nota la escribe el checkout, el encargo o quien vende, nunca Tincho (no le
+                                        // habla a quien compra) y la API no guarda otro origen.
                                         Texto(nota, Estilo.subhead, C.texto, interlineado = 2f)
-                                        Texto("Tincho · de la charla con quien compró", Estilo.chip.con(Peso.regular), C.texto2)
                                     }
                                 }
                             }
                             if (puedeCancelar(p)) BotonTexto("Cancelar pedido", { cancelar = true }, alto = 50.dp, color = C.errorTinta)
                         }
                     }
-                    val sig = if (Marcas.esperaPago(p.estado, p.pago, p.canal)) null else Marcas.siguiente(p.estado, p.envio)
+                    val sig = if (Marcas.esperaPago(p.estado, p.pago, p.canal, p.estadoPago)) null else Marcas.siguiente(p.estado, p.envio)
                     if (sig != null) {
                         Column(Modifier.fillMaxWidth().background(tema(0xFBF7F2, 0x22140D, alfa = 0.94f).actual)) {
                             Box(Modifier.fillMaxWidth().height(0.5.dp).background(C.linea2))
@@ -184,7 +188,7 @@ fun DetallePedido(numero: Int) {
         }
     }
     LaunchedEffect(estado.version) { cargar() }
-    Hoja(cancelar, { cancelar = false }) { carga.valor?.let { p -> CancelarPedido(p) { cargar() } } }
+    Hoja(cancelar, { cancelar = false }) { carga.valor?.let { p -> CancelarPedido(p) { cargar(trasCambio = true) } } }
 }
 
 @Composable
@@ -274,9 +278,13 @@ private fun Pago(p: PedidoDetalle) {
             Texto(Marcas.pago(p.pago), Estilo.fila, C.texto, Modifier.weight(1f))
             ChipPago(p.estadoPago)
         }
-        if (Marcas.esperaPago(p.estado, p.pago, p.canal)) {
+        if (Marcas.esperaPago(p.estado, p.pago, p.canal, p.estadoPago)) {
             Texto(Formato.sinViudas("Esperando que se acredite el pago con Mercado Pago. Si no se paga en 24 horas, se cancela solo y el stock vuelve."),
                 Estilo.texto14, C.texto2)
+        } else if (p.estado == "Sin pagar" && p.pago == "mp" && Marcas.pagoCobrado(p.estadoPago)) {
+            // Uno ya cobrado que se volvió a «Sin pagar»: no espera nada, se avanza con el botón.
+            Texto(Formato.sinViudas(if (p.estadoPago == "Seña") "La seña ya se acreditó. Pasalo a preparar cuando quieras."
+                else "El pago ya se acreditó. Pasalo a preparar cuando quieras."), Estilo.texto14, C.texto2)
         } else if (p.estado == "Sin pagar") {
             Texto(if (p.pago == "transf") Formato.sinViudas("Cuando veas la transferencia en tu cuenta, marcalo como cobrado.")
                 else Formato.sinViudas("Todavía no se acreditó. Si te pagó por otro lado, marcalo como cobrado."), Estilo.texto14, C.texto2)
