@@ -15,6 +15,8 @@ import ar.com.tulocalweb.app.nucleo.Api
 import ar.com.tulocalweb.app.nucleo.Clerk
 import ar.com.tulocalweb.app.nucleo.DatosSesion
 import ar.com.tulocalweb.app.nucleo.ErrorApi
+import ar.com.tulocalweb.app.nucleo.Fecha
+import ar.com.tulocalweb.app.nucleo.Formato
 import ar.com.tulocalweb.app.nucleo.errorDe
 import ar.com.tulocalweb.app.nucleo.Guardado
 import ar.com.tulocalweb.app.nucleo.Llavero
@@ -34,6 +36,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
+import ar.com.tulocalweb.app.pantallas.mas.CatalogoPlanes
 import ar.com.tulocalweb.app.pantallas.mas.DatosEditor
 import ar.com.tulocalweb.app.pantallas.mas.EditorTienda
 
@@ -144,6 +147,7 @@ class Estado(api: Api? = null) {
 
     init {
         this.api.alPerderSesion = { alcance.launch { sesionPerdida() } }
+        this.api.alTope = { e -> alcance.launch { avisarTope(e) } }
     }
 
     val tienda: Acceso.Tienda? get() = acceso?.tienda
@@ -412,12 +416,64 @@ class Estado(api: Api? = null) {
     // MARK: Avisos (toasts)
 
     fun avisar(texto: String, ok: Boolean = true, deshacer: (() -> Unit)? = null) {
-        aviso = Aviso(texto, ok, deshacer)
+        // Un error no pisa el aviso de tope de plan que ya está a la vista: el genérico de la pantalla
+        // («No pudimos guardarlo») llega después del tope y diría menos.
+        aviso?.let { if (it.tope && !ok) return }
+        mostrar(Aviso(texto, ok, deshacer), 4000)
+    }
+
+    /** Un tope de plan (402 tope_plan), desde cualquier pantalla: qué no entra y «Ver mi plan», que abre Plan (la
+     *  app no vende planes: ahí se ve qué incluye cada uno). El plan lo maneja la dueña: al resto sólo se le dice. */
+    fun avisarTope(e: ErrorApi) {
+        val ver: (() -> Unit)? = if (acceso?.rol == "duenio") ({ rutaPendiente = Ruta.destino(Destino.plan) }) else null
+        mostrar(Aviso(e.detalle, ok = false, deshacer = ver, accion = if (ver == null) null else "Ver mi plan", tope = true), 7000)
+    }
+
+    private fun mostrar(a: Aviso, ms: Long) {
+        aviso = a
         avisoTarea?.cancel()
         avisoTarea = alcance.launch {
-            delay(4000)
+            delay(ms)
             aviso = null
         }
+    }
+
+    /** El plan que rige hoy (en la prueba gratis, Crece, con la fecha de fin que da la API), de GET /v1/panel/tienda.
+     *  Se guarda 10 minutos por tienda (fresco: se vuelve a pedir): sirve para avisar un tope antes de cargar algo (el
+     *  servidor lo topa igual). */
+    suspend fun planVigente(fresco: Boolean = false): CatalogoPlanes.Plan? {
+        val id = acceso?.tiendaId ?: return null
+        if (!fresco) planGuardado?.let { (t, p, en) -> if (t == id && System.currentTimeMillis() - en < 600_000) return p }
+        val t = api.opcional<TiendaPlan>("/v1/panel/tienda") ?: return null
+        val fin = Fecha.iso(t.finPrueba)?.toEpochMilli()
+            ?: ((Fecha.iso(t.creadaEn)?.toEpochMilli() ?: 0L) + CatalogoPlanes.DIAS_DE_PRUEBA * 86_400_000L)
+        val p = CatalogoPlanes.de(if (t.plan == "gratis" && System.currentTimeMillis() < fin) CatalogoPlanes.DESTACADO else t.plan)
+        planGuardado = Triple(id, p, System.currentTimeMillis())
+        return p
+    }
+    private var planGuardado: Triple<String, CatalogoPlanes.Plan, Long>? = null
+
+    /** Olvida el plan guardado (al abrir Plan o al volver la app a primer plano: pudo cambiar en la web). */
+    fun olvidarPlan() { planGuardado = null }
+
+    /** Lo que hace falta de GET /v1/panel/tienda para saber el plan que rige. */
+    @Serializable
+    private data class TiendaPlan(val plan: String = "gratis", val creadaEn: String = "", val finPrueba: String = "")
+
+    /** Antes de crear algo con tope (productos, personas): si ya está lleno, avisa con «Ver mi plan» y devuelve false.
+     *  La copia guardada sólo sirve para dejar pasar: para frenar se confirma con el plan recién leído (si se acaba de
+     *  pasar de plan en la web, no se frena de más). */
+    suspend fun entraOtro(campo: (CatalogoPlanes.Plan) -> Int, hay: Int, que: String): Boolean {
+        val guardado = planVigente() ?: return true
+        if (campo(guardado) <= 0 || hay < campo(guardado)) return true
+        val p = planVigente(fresco = true) ?: return true
+        val tope = campo(p)
+        if (tope <= 0 || hay < tope) return true
+        val sube = CatalogoPlanes.todos.firstOrNull { campo(it) == 0 || campo(it) > tope } ?: p
+        val hasta = if (campo(sube) == 0) "sin tope" else "hasta ${Formato.numero(campo(sube))}"
+        avisarTope(ErrorApi(402, "tope_plan", "", "Tu plan ${p.nombre} llega hasta ${Formato.numero(tope)} $que. Con ${sube.nombre}, $hasta.",
+            plan = sube.id))
+        return false
     }
 
     // MARK: Push

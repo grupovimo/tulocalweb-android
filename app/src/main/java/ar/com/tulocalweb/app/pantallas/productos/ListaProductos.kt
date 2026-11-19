@@ -34,6 +34,8 @@ import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import ar.com.tulocalweb.app.app.Destino
 import ar.com.tulocalweb.app.app.LocalEstado
 import ar.com.tulocalweb.app.app.LocalNavegacion
@@ -76,6 +78,16 @@ fun ListaProductos() {
     var stockDe by remember { mutableStateOf<ProductoFila?>(null) }
     var cargandoMas by remember { mutableStateOf(false) }
     val lista = rememberLazyListState()
+    val alcanceNuevo = rememberCoroutineScope()
+    /** Un producto nuevo: con el tope del plan lleno, se avisa antes de abrir el editor. */
+    fun nuevo() {
+        alcanceNuevo.launch {
+            val d = carga.valor
+            // Todos los de la tienda (la suma de los estados), no el total con la búsqueda o el filtro puestos.
+            if (d != null && !estado.entraOtro({ it.productos }, d.segmentos.values.sum(), "productos")) return@launch
+            nav.productos.add(Destino.nuevoProducto(null))
+        }
+    }
 
     fun query(desde: Int): List<Pair<String, String>> = buildList {
         add("orden" to orden); add("desde" to desde.toString()); add("cuantos" to "60")
@@ -126,7 +138,7 @@ fun ListaProductos() {
             }
             if (estado.puede("catalogo")) item {
                 Row(Modifier.padding(top = 12.dp).margenPantalla(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Row(Modifier.height(42.dp).clip(Capsula).background(C.primario).clickable { nav.productos.add(Destino.nuevoProducto(null)) }.padding(horizontal = 16.dp),
+                    Row(Modifier.height(42.dp).clip(Capsula).background(C.primario).clickable { nuevo() }.padding(horizontal = 16.dp),
                         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Icono("plus", 15f, Color.White); Texto("Nuevo producto", Estilo.subheadFuerte, Color.White)
                     }
@@ -143,7 +155,8 @@ fun ListaProductos() {
                             EstadoTira("Publicados", (seg["active"] ?: 0) + (seg["out"] ?: 0), C.ok, "active,out"),
                             EstadoTira("Sin stock", seg["out"] ?: 0, C.errorTinta, "out"),
                             EstadoTira("Pausados", (seg["paused"] ?: 0) + (seg["draft"] ?: 0), C.texto3, "paused,draft"),
-                        ), segmento) { segmento = it }
+                        ) + (if ((seg["fuera"] ?: 0) > 0) listOf(EstadoTira("Fuera del plan", seg["fuera"] ?: 0, C.avisoTinta, "fuera")) else emptyList()),
+                            segmento) { segmento = it }
                     }
                 }
             }
@@ -176,7 +189,7 @@ fun ListaProductos() {
                 is Carga.error -> item { Box(Modifier.padding(top = 60.dp)) { EstadoError("los productos", c.e) { estado.tarea { cargar() } } } }
                 is Carga.listo -> {
                     val d = c.v
-                    if (d.filas.isEmpty()) item { Box(Modifier.padding(top = 50.dp)) { VacioProductos(busqueda, segmento, { segmento = null }) { nav.productos.add(Destino.nuevoProducto(null)) } } }
+                    if (d.filas.isEmpty()) item { Box(Modifier.padding(top = 50.dp)) { VacioProductos(busqueda, segmento, { segmento = null }) { nuevo() } } }
                     else {
                         item {
                             Column(Modifier.margenPantalla().fillMaxWidth().tarjeta()) {
@@ -228,7 +241,8 @@ private fun VacioProductos(busqueda: String, segmento: String?, verTodos: () -> 
 /** La fila de un producto (thumbnail 56). */
 @Composable
 fun FilaProducto(p: ProductoFila) {
-    val pausado = !p.publicado
+    val fuera = p.fueraDePlan == true
+    val pausado = !p.publicado || fuera
     Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp).alpha(if (pausado) 0.75f else 1f), horizontalArrangement = Arrangement.spacedBy(12.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Miniatura(p.foto, 56.dp, radio = 13.dp)
@@ -245,7 +259,8 @@ fun FilaProducto(p: ProductoFila) {
                 }
             }, Estilo.texto14, C.texto2, numeros = true)
             Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                if (pausado) EtiquetaCanal("En pausa", C.apagadoFondo, C.neutroTinta)
+                if (fuera) EtiquetaCanal("Oculto · fuera de tu plan", C.avisoFondo, C.bannerTinta)
+                else if (pausado) EtiquetaCanal("En pausa", C.apagadoFondo, C.neutroTinta)
                 else {
                     if ("web" in p.canales || p.canales.isEmpty()) EtiquetaCanal("Web", C.pista, C.neutroTinta)
                     if ("ml" in p.canales) EtiquetaCanal("ML", C.avisoFondo, C.bannerTinta)
