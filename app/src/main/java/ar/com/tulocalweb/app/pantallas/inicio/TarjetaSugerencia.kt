@@ -47,12 +47,11 @@ data class SugerenciaLista(val sugerencia: Sugerencia, val imagen: ImageBitmap)
 /** La sugerencia de la casa del Inicio (docs/laminas/sugerencia.html): otra app de Grupo Vimo según el rubro de la
  *  tienda, debajo de las acciones y de «Para hacer hoy». Viene de /v1/panel/sugerencia, que las apps viejas no llaman.
  *  Inicio la pide aparte del tablero, una vez por tienda, y trae la imagen antes: si no hay sugerencia, si falla o si
- *  la imagen no baja, no se dibuja nada. La cruz abre «Ocultar por 30 días», «No mostrarla más» (esta marca, para
- *  siempre) y «Apagar las sugerencias» (todas, como el interruptor de Cuenta); al elegir se va en el acto y el pedido
- *  sale atrás. */
+ *  la imagen no baja, no se dibuja nada. La cruz abre «Ocultar por 30 días» y «Ya la uso / No me interesa» (esta
+ *  marca, para siempre), en todos los planes; al elegir se va en el acto y el pedido sale atrás. Apagarlas todas es el
+ *  interruptor de Cuenta, que sólo está con un plan pago. */
 @Composable
-fun TarjetaSugerencia(sugerencia: Sugerencia, imagen: ImageBitmap, paleta: PaletaTienda, cerrar: (hasta: String) -> Unit,
-                      apagar: () -> Unit) {
+fun TarjetaSugerencia(sugerencia: Sugerencia, imagen: ImageBitmap, paleta: PaletaTienda, cerrar: (hasta: String) -> Unit) {
     val estado = LocalEstado.current
     val ctx = LocalContext.current
     val forma = RoundedCornerShape(16.dp)
@@ -86,8 +85,7 @@ fun TarjetaSugerencia(sugerencia: Sugerencia, imagen: ImageBitmap, paleta: Palet
         Box(Modifier.align(Alignment.TopEnd).padding(4.dp)) {
             MenuBoton(listOf(
                 OpcionDeMenu("Ocultar por 30 días", "") { cerrar("30d") },
-                OpcionDeMenu("No mostrarla más", "") { cerrar("siempre") },
-                OpcionDeMenu("Apagar las sugerencias", "") { apagar() },
+                OpcionDeMenu("Ya la uso / No me interesa", "") { cerrar("siempre") },
             ), "Ocultar sugerencia") {
                 Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) { Icono("xmark", 13f, C.texto3) }
             }

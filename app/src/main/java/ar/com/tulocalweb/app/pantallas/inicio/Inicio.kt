@@ -47,9 +47,7 @@ import ar.com.tulocalweb.app.nucleo.Preferencias
 import ar.com.tulocalweb.app.nucleo.RespuestaSugerencia
 import ar.com.tulocalweb.app.nucleo.Sugerencia
 import ar.com.tulocalweb.app.nucleo.Tablero
-import ar.com.tulocalweb.app.pantallas.mas.AjusteSugerencias
 import ar.com.tulocalweb.app.nucleo.errorDe
-import ar.com.tulocalweb.app.nucleo.intentar
 import ar.com.tulocalweb.app.nucleo.opcional
 import ar.com.tulocalweb.app.tema.*
 import kotlinx.serialization.Serializable
@@ -122,26 +120,9 @@ fun Inicio() {
     fun cerrarSugerencia(s: Sugerencia, hasta: String) {
         sugerencia = null
         SugerenciaPedida.lista = null
-        // El aviso dice dónde se deshace (el interruptor «Sugerencias» de Cuenta).
-        estado.avisar(if (hasta == "siempre") "No te la mostramos más. Se vuelve a prender en Más › Perfil, seguridad y tema"
-                      else "La ocultamos por 30 días")
+        estado.avisar(if (hasta == "siempre") "Listo, no la vas a ver más" else "La ocultamos por 30 días")
         @Serializable data class Cuerpo(val hasta: String)
         estado.tarea { runCatching { estado.api.hacer("POST", "/v1/panel/sugerencia/${s.id}/cerrar", Cuerpo(hasta)) } }
-    }
-
-    // Todas, como el interruptor de Cuenta. Si no se guarda, la tarjeta vuelve.
-    fun apagarSugerencias(l: SugerenciaLista) {
-        sugerencia = null
-        SugerenciaPedida.lista = null
-        estado.tarea {
-            if (intentar { estado.api.hacer("PUT", "/v1/panel/sugerencias/ajuste", AjusteSugerencias(false)) }) {
-                estado.avisar("Sugerencias apagadas. Las prendés de nuevo en Más › Perfil, seguridad y tema")
-            } else {
-                sugerencia = l
-                SugerenciaPedida.lista = l
-                estado.avisar("No pudimos apagar las sugerencias", ok = false)
-            }
-        }
     }
 
     suspend fun cargar() {
@@ -178,7 +159,7 @@ fun Inicio() {
                     Carga.cargando -> EsqueletoInicio(paleta)
                     is Carga.error -> Box(Modifier.padding(top = 30.dp).margenPantalla()) { EstadoError("cómo viene el día", c.e) { estado.tarea { cargar() } } }
                     is Carga.listo -> Contenido(c.v, periodo, masViejo, paleta, ideasOcultas, { ideasOcultas = ideasOcultas + it }, { editarMeta = true },
-                        sugerencia, { s, h -> cerrarSugerencia(s, h) }, { apagarSugerencias(it) })
+                        sugerencia, { s, h -> cerrarSugerencia(s, h) })
                 }
             }
         }
@@ -206,7 +187,7 @@ private object SugerenciaPedida {
 
 @Composable
 private fun Contenido(t: Tablero, periodo: String, masViejo: Instant?, paleta: PaletaTienda, ocultas: Set<String>, ocultar: (String) -> Unit, editarMeta: () -> Unit,
-                      sugerencia: SugerenciaLista?, cerrarSugerencia: (Sugerencia, String) -> Unit, apagarSugerencias: (SugerenciaLista) -> Unit) {
+                      sugerencia: SugerenciaLista?, cerrarSugerencia: (Sugerencia, String) -> Unit) {
     val estado = LocalEstado.current
     val cero = Vidriera.enCero(t)
     if (!cero) ideaPrincipal(t, ocultas, ocultar)?.let { TarjetaTincho(it, paleta, Modifier.subir(28.dp).padding(horizontal = 16.dp)) }
@@ -218,7 +199,7 @@ private fun Contenido(t: Tablero, periodo: String, masViejo: Instant?, paleta: P
             AccionesInicio(t, paleta)
         }
         ParaHacerHoy(t, masViejo, paleta, cero)
-        sugerencia?.let { l -> TarjetaSugerencia(l.sugerencia, l.imagen, paleta, { hasta -> cerrarSugerencia(l.sugerencia, hasta) }, { apagarSugerencias(l) }) }
+        sugerencia?.let { l -> TarjetaSugerencia(l.sugerencia, l.imagen, paleta) { hasta -> cerrarSugerencia(l.sugerencia, hasta) } }
         DeUnVistazo(t, periodo, paleta, editarMeta)
         if (t.ultimosPedidos.isNotEmpty()) UltimosPedidos(t, paleta)
         if (t.masVendidos.isNotEmpty()) LoMasVendido(t)
