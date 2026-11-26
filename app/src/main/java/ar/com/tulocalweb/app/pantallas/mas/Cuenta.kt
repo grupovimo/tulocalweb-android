@@ -17,6 +17,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,6 +29,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import ar.com.tulocalweb.app.app.BarraDe
 import ar.com.tulocalweb.app.app.Destino
@@ -45,6 +47,10 @@ import kotlinx.serialization.Serializable
 
 // Clon de Pantallas/Mas/Cuenta.swift.
 
+/** null: a esta tienda no le toca ninguna sugerencia (función apagada, rol o rubro) y el renglón no se muestra. */
+@Serializable
+data class AjusteSugerencias(val activas: Boolean? = null)
+
 /** 11h · Cuenta: la persona, seguridad (la huella, contraseña, cerrar otras sesiones), tema (Claro / Oscuro / Sistema),
  *  avisos y ayuda. */
 @Composable
@@ -57,12 +63,31 @@ fun Cuenta() {
     var dosPasos by remember { mutableStateOf<EstadoDosPasos?>(null) }
     var verDosPasos by remember { mutableStateOf(false) }
     var borrar by remember { mutableStateOf(false) }
+    // El interruptor «Sugerencias» (null: todavía no se leyó, o no es dueña ni administración).
+    var sugerencias by remember { mutableStateOf<Boolean?>(null) }
 
     fun leerAvisos() { avisosPermitidos = Push.hayPermiso(ctx) }
 
     LaunchedEffect(Unit) {
         leerAvisos()
         dosPasos = estado.api.opcional("/v1/auth/segundo-factor")
+        if (estado.puede("tienda")) sugerencias = runCatching { estado.api.opcional<AjusteSugerencias>("/v1/panel/sugerencias/ajuste") }.getOrNull()?.activas
+    }
+
+    suspend fun cambiarSugerencias(v: Boolean) {
+        val antes = sugerencias
+        sugerencias = v
+        try {
+            estado.api.hacer("PUT", "/v1/panel/sugerencias/ajuste", AjusteSugerencias(v))
+            estado.versionSugerencias += 1
+            // El mismo aviso que la web (Configuración › Notificaciones).
+            estado.avisar(if (v) "Sugerencias prendidas. Te pueden aparecer en el Inicio" else "Sugerencias apagadas. No te vamos a mostrar ninguna")
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            sugerencias = antes
+            estado.avisar("No pudimos guardar las sugerencias", ok = false)
+        }
     }
 
     suspend fun cambiarFaceID(v: Boolean) {
@@ -130,6 +155,19 @@ fun Cuenta() {
             }
             Separador()
             Fila("Qué te avisamos") { nav.mas.add(Destino.preferenciasAvisos) }
+            sugerencias?.let { activas ->
+                Separador()
+                // Un solo elemento para TalkBack: «Sugerencias, …, interruptor, activado» (el Toggle de iOS).
+                Row(Modifier.fillMaxWidth().toggleable(activas, role = Role.Switch) { alcance.launch { cambiarSugerencias(it) } }
+                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Texto("Sugerencias", Estilo.body16, C.texto)
+                        Texto(Formato.sinViudas("Otras apps nuestras que te pueden servir, según tu rubro. Para eso no sale ningún dato tuyo."), Estilo.footnote, C.texto2)
+                    }
+                    Llave(activas, null)
+                }
+            }
         }
         EtiquetaSeccion("Tema", Modifier.padding(horizontal = 4.dp).padding(top = 10.dp))
         Segmentado(listOf("claro" to "Claro", "oscuro" to "Oscuro", "sistema" to "Sistema"), estado.tema, { estado.ponerTema(it) })

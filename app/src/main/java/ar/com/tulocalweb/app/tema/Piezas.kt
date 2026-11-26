@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -53,6 +54,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.selected
@@ -547,21 +549,25 @@ fun Grabber() {
 
 // MARK: - Interruptor
 
-/** Toggle de 51 × 31 en `ok`. */
+/** Toggle de 51 × 31 en `ok`. Toda la fila es un solo interruptor para TalkBack («…, interruptor, activado»), como
+ *  el Toggle de iOS: la llave de adentro no se anuncia aparte. */
 @Composable
 fun Interruptor(texto: String, prendido: Boolean, alCambiar: (Boolean) -> Unit, modifier: Modifier = Modifier, habilitado: Boolean = true) {
-    Row(modifier.fillMaxWidth().heightIn(min = 44.dp).clickable(enabled = habilitado) { alCambiar(!prendido) }.alpha(if (habilitado) 1f else 0.5f),
+    Row(modifier.fillMaxWidth().heightIn(min = 44.dp).toggleable(prendido, enabled = habilitado, role = Role.Switch, onValueChange = alCambiar)
+        .alpha(if (habilitado) 1f else 0.5f),
         verticalAlignment = Alignment.CenterVertically) {
         Texto(texto, Estilo.body16, C.texto, Modifier.weight(1f))
-        Llave(prendido, alCambiar, habilitado = habilitado)
+        Llave(prendido, null, habilitado = habilitado)
     }
 }
 
-/** El interruptor suelto (Toggle con .labelsHidden()). */
+/** El interruptor suelto (Toggle con .labelsHidden()), con su estado para TalkBack. Con `alCambiar` nulo es sólo el
+ *  dibujo: lo usa una fila que ya es el interruptor (Interruptor, o un Row con .toggleable). */
 @Composable
-fun Llave(prendido: Boolean, alCambiar: (Boolean) -> Unit, color: Color = C.ok, habilitado: Boolean = true) {
+fun Llave(prendido: Boolean, alCambiar: ((Boolean) -> Unit)?, color: Color = C.ok, habilitado: Boolean = true) {
     val x by animateDpAsState(if (prendido) 20.dp else 0.dp, tween(180), label = "llave")
-    Box(Modifier.size(51.dp, 31.dp).clip(Capsula).background(if (prendido) color else C.linea2).clickable(enabled = habilitado) { alCambiar(!prendido) }.padding(2.dp)) {
+    val toque = if (alCambiar != null) Modifier.toggleable(prendido, enabled = habilitado, role = Role.Switch, onValueChange = alCambiar) else Modifier
+    Box(Modifier.size(51.dp, 31.dp).clip(Capsula).background(if (prendido) color else C.linea2).then(toque).padding(2.dp)) {
         Box(Modifier.offset(x = x).size(27.dp).sombra(CircleShape, Color.Black.copy(alpha = 0.15f), 4.dp, y = 2.dp).clip(CircleShape).background(Color.White))
     }
 }

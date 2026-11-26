@@ -77,6 +77,24 @@ data class Comparado(val actual: Double = 0.0, val anterior: Double = 0.0) {
     val variacion: Double? get() = if (anterior > 0) (actual - anterior) / anterior * 100 else null
 }
 
+/** Una sugerencia de la casa (/v1/panel/sugerencia): otra app de Grupo Vimo. Los textos vienen del servidor; si el campo
+ *  falta o llega null, no se muestra nada. */
+@Serializable
+data class Sugerencia(
+    val id: String,
+    val marca: String,
+    val sello: String,
+    val titulo: String,
+    val cta: String,
+    val url: String,
+    val imagen: String,
+    val banner: String? = null,
+    val color: String? = null,
+)
+
+@Serializable
+data class RespuestaSugerencia(val sugerencia: Sugerencia? = null)
+
 @Serializable
 data class Tablero(
     val periodo: String = "",

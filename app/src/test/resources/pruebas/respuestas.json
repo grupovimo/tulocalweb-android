@@ -871,6 +871,8 @@
   ],
   "sinLeer": 2
  },
+ "/v1/panel/sugerencia": {"sugerencia": null},
+ "/v1/panel/sugerencias/ajuste": {"activas": true},
  "/v1/panel/notificaciones/sin-leer": {
   "sinLeer": 2
  },

@@ -108,6 +108,8 @@ class Estado(api: Api? = null) {
     var bloqueada by mutableStateOf(false)
     /** Para que las listas se vuelvan a pedir después de un cambio (estado de un pedido, stock). */
     var version by mutableIntStateOf(0)
+    /** Sube cuando cambia el interruptor «Sugerencias»: el Inicio vuelve a pedir la suya (sin recargar el resto). */
+    var versionSugerencias by mutableIntStateOf(0)
     /** Token de FCM, cuando Android lo da. */
     var tokenPush by mutableStateOf<String?>(null)
         private set
